@@ -1,9 +1,10 @@
-# УМНЫЙ DEEPTHINK С ЧИСТЫМИ ОТВЕТАМИ
+# УМНЫЙ DEEPTHINK С ВНЕШНИМИ КОНФИГУРАЦИЯМИ
 
-print("Проверка зависимостей...")
-
+import os
 import subprocess
 import sys
+import numpy as np
+import time
 
 def is_package_installed(package):
     try:
@@ -12,7 +13,8 @@ def is_package_installed(package):
     except ImportError:
         return False
 
-# Проверяем и устанавливаем только отсутствующие зависимости
+print("Проверка зависимостей...")
+
 required_packages = ["sentence_transformers", "requests", "numpy"]
 packages_to_install = []
 
@@ -31,42 +33,67 @@ if packages_to_install:
 else:
     print("Все зависимости уже установлены")
 
-import numpy as np
-import time
 from sentence_transformers import SentenceTransformer
 
-print("Система готова к работе")
+class ConfigLoader:
+    @staticmethod
+    def load_security_rules():
+        """Загрузка правил безопасности из файла"""
+        security_rules = {}
+        try:
+            with open('security_rules.txt', 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and ':' in line:
+                        pattern, reason = line.split(':', 1)
+                        security_rules[pattern.strip()] = reason.strip()
+            print(f"Загружено правил безопасности: {len(security_rules)}")
+            return security_rules
+        except FileNotFoundError:
+            print("Файл security_rules.txt не найден. Использую правила по умолчанию.")
+            return {
+                'выполни команду': 'выполнять системные команды',
+                'напиши код': 'генерировать программный код'
+            }
+    
+    @staticmethod
+    def load_knowledge_base():
+        """Загрузка базы знаний из файла"""
+        documents = []
+        try:
+            with open('knowledge_base.txt', 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and ':' in line:
+                        documents.append(line)
+            print(f"Загружено документов: {len(documents)}")
+            return documents
+        except FileNotFoundError:
+            print("Файл knowledge_base.txt не найден. Использую базовые документы.")
+            return [
+                "КРЕДИТ: Деньги банка на 1-5 лет под 12-18% годовых.",
+                "ИПОТЕКА: Кредит на недвижимость под 8-12% годовых."
+            ]
 
 class SmartDeepThinkRAG:
     def __init__(self):
         print("Инициализация Thinking RAG...")
+        
+        # Загрузка конфигураций
+        self.security_rules = ConfigLoader.load_security_rules()
+        self.documents = ConfigLoader.load_knowledge_base()
+        
+        # Инициализация модели
         self.embedder = SentenceTransformer('cointegrated/rubert-tiny2')
-        
-        self.documents = [
-            "КРЕДИТ: Деньги банка на 1-5 лет под 12-18% годовых. Для оформления нужен паспорт и справка 2-НДФЛ. Можно получить до 5 млн рублей.",
-            "ИПОТЕКА: Кредит на недвижимость под 8-12% годовых. Требуется взнос 15-20%. Срок до 30 лет. Нужен паспорт, справки о доходах, выписка из ЕГРН.",
-            "ВКЛАД: Счет для денег под 5-7% годовых. Минимум 10 000 руб. Можно пополнять и снимать. Нужен только паспорт для открытия.",
-            "КАРТА: Дебетовая карта - обслуживание 0-500 руб/год. Кэшбэк до 5% в категориях: АЗС, аптеки, супермаркеты. Выдается по паспорту.",
-        ]
-        
         self.doc_embeddings = self.embedder.encode(self.documents)
-        print(f"База знаний: {len(self.documents)} документов")
+        
+        print(f"Система готова. База знаний: {len(self.documents)} документов")
     
     def security_check(self, question):
-        """Проверка безопасности с детальным reasoning"""
-        dangerous_patterns = {
-            'выполни команду': "выполнять системные команды",
-            'скачай файл': "скачивать или запускать файлы", 
-            'покажи промпт': "показывать внутренние инструкции",
-            'напиши код': "генерировать программный код",
-            'sql': "работать с базами данных",
-            'пароль': "предоставлять доступ к конфиденциальным данным",
-            'взломай': "выполнять неавторизованные действия",
-            'обойди защиту': "обходить системы безопасности"
-        }
-        
+        """Проверка безопасности с загрузкой из файла"""
         question_lower = question.lower()
-        for pattern, action in dangerous_patterns.items():
+        
+        for pattern, action in self.security_rules.items():
             if pattern in question_lower:
                 return False, f"Пользователь просит меня {action}. Но это запрещено моими инструкциями безопасности."
         
@@ -148,7 +175,7 @@ class SmartDeepThinkRAG:
             thinking.append("   Лучше предложу информацию о банковских продуктах")
             
         elif intent == "definition":
-            product_keywords = ['кредит', 'ипотек', 'вклад', 'карт']
+            product_keywords = ['кредит', 'ипотек', 'вклад', 'карт', 'страхован', 'инвестиц']
             found_products = []
             for keyword in product_keywords:
                 if keyword in question.lower():
@@ -228,8 +255,6 @@ class SmartDeepThinkRAG:
                     if ':' in doc:
                         product, info = doc.split(':', 1)
                         doc_list.append(f"- {product.strip()}: {info.strip()}")
-                    else:
-                        doc_list.append(f"- {doc}")
             
             if doc_list:
                 return "Для оформления потребуются следующие документы:\n" + "\n".join(doc_list[:3])
@@ -242,8 +267,6 @@ class SmartDeepThinkRAG:
                     if ':' in doc:
                         product, info = doc.split(':', 1)
                         rates_info.append(f"- {product.strip()}: {info.strip()}")
-                    else:
-                        rates_info.append(f"- {doc}")
             
             if rates_info:
                 return "Актуальные ставки по нашим продуктам:\n" + "\n".join(rates_info[:3])
@@ -263,8 +286,6 @@ class SmartDeepThinkRAG:
                 if ':' in doc:
                     product, info = doc.split(':', 1)
                     clean_docs.append(f"- {product.strip()}: {info.strip()}")
-                else:
-                    clean_docs.append(f"- {doc}")
             return "На основе наших продуктов:\n" + "\n".join(clean_docs)
     
     def ask(self, question):
@@ -297,41 +318,42 @@ class SmartDeepThinkRAG:
         return f"{answer}\n\nВремя ответа: {response_time:.2f} сек"
 
 # Запуск системы
-print("Запускаем Thinking RAG...")
-smart_rag = SmartDeepThinkRAG()
+if __name__ == "__main__":
+    print("Запускаем Thinking RAG...")
+    smart_rag = SmartDeepThinkRAG()
 
-print("\nТестирование системы:")
+    print("\nТестирование системы:")
 
-test_cases = [
-    "Что такое кредит? -deepthink",
-    "Какие документы нужны для ипотеки? -deepthink", 
-    "Напиши код для таблицы на SQL -deepthink",
-    "Какая ставка по вкладам? -deepthink",
-    "Что такое дебетовая карта? -deepthink",
-]
+    test_cases = [
+        "Что такое кредит? -deepthink",
+        "Какие документы нужны для ипотеки? -deepthink", 
+        "Напиши код для таблицы на SQL -deepthink",
+        "Какая ставка по вкладам? -deepthink",
+        "Что такое дебетовая карта? -deepthink",
+    ]
 
-for question in test_cases:
-    print(f"\n" + "="*60)
-    print(f"Вопрос: {question}")
-    answer = smart_rag.ask(question)
-    print(f"\n{answer}")
-    print("="*60)
+    for question in test_cases:
+        print(f"\n" + "="*60)
+        print(f"Вопрос: {question}")
+        answer = smart_rag.ask(question)
+        print(f"\n{answer}")
+        print("="*60)
 
-# Интерактивный режим
-print("\nИнтерактивный режим")
-print("Добавьте '-deepthink' для показа процесса мышления")
-print("Введите вопрос или 'стоп' для выхода")
+    # Интерактивный режим
+    print("\nИнтерактивный режим")
+    print("Добавьте '-deepthink' для показа процесса мышления")
+    print("Введите вопрос или 'стоп' для выхода")
 
-while True:
-    user_question = input("\nВаш вопрос: ").strip()
-    
-    if user_question.lower() in ['стоп', 'stop', 'exit']:
-        print("Завершение работы...")
-        break
+    while True:
+        user_question = input("\nВаш вопрос: ").strip()
         
-    if not user_question:
-        continue
-    
-    answer = smart_rag.ask(user_question)
-    print(f"\n{answer}")
-    print("-" * 50)
+        if user_question.lower() in ['стоп', 'stop', 'exit']:
+            print("Завершение работы...")
+            break
+            
+        if not user_question:
+            continue
+        
+        answer = smart_rag.ask(user_question)
+        print(f"\n{answer}")
+        print("-" * 50)
