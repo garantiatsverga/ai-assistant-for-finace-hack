@@ -1,0 +1,27 @@
+{
+  "definition": {
+    "keywords": ["что такое", "определение", "означает"],
+    "description": "Пользователь хочет получить определение понятия",
+    "response_strategy": "definition"
+  },
+  "documents": {
+    "keywords": ["какие документы", "что нужно", "требуется"],
+    "description": "Пользователь интересуется необходимыми документами", 
+    "response_strategy": "documents"
+  },
+  "rates": {
+    "keywords": ["ставк", "процент", "сколько стоит"],
+    "description": "Пользователь спрашивает о стоимости или процентных ставках",
+    "response_strategy": "rates"
+  },
+  "process": {
+    "keywords": ["как оформить", "процесс", "получить"],
+    "description": "Пользователь хочет узнать процесс оформления",
+    "response_strategy": "process"
+  },
+  "code_request": {
+    "keywords": ["код", "программ", "sql", "таблиц"],
+    "description": "Пользователь просит написать код",
+    "response_strategy": "reject"
+  }
+}
