@@ -67,18 +67,18 @@ class SmartDeepThinkRAG:
         """Асинхронный метод обработки вопроса"""
         start_time = time.time()
         
-        # Сохраняем оригинальный вопрос для метрик
-        original_question = question
-        
-        # Проверяем режим deep think
-        deepthink_mode = question.endswith(" -deepthink")
-        if deepthink_mode:
-            question = question[:-10].strip()
-            
-        # Исправляем раскладку
-        question = self._fix_keyboard_layout(question)
-        
         try:
+            # Сохраняем оригинальный вопрос для метрик
+            original_question = question
+            
+            # Проверяем режим deep think
+            deepthink_mode = question.endswith(" -deepthink")
+            if deepthink_mode:
+                question = question[:-10].strip()
+                
+            # Исправляем раскладку
+            question = self._fix_keyboard_layout(question)
+            
             # Параллельно получаем эмбеддинги и проверяем безопасность
             embedding_task = self.embedding_manager.get_embedding(question)
             security_task = self.security.check(question)
@@ -105,9 +105,12 @@ class SmartDeepThinkRAG:
             
             return f"{answer}\n\n⏱️ Время ответа: {response_time:.2f} сек"
             
-        except Exception as e:
+        except RuntimeError as e:
             logger.error(f"Ошибка при обработке вопроса: {e}")
-            return "Произошла ошибка при обработке вашего вопроса"
+            return "😔 Извините, произошла техническая ошибка. Попробуйте повторить запрос позже."
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка: {e}")
+            return "❌ Произошла непредвиденная ошибка. Пожалуйста, обратитесь к администратору."
 
     def ask_sync(self, question: str) -> str:
         """Синхронная обертка для ask"""

@@ -2,6 +2,7 @@ from typing import List, Optional
 from langchain_ollama import OllamaLLM
 import asyncio
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,27 @@ class LLMAdapter:
             logger.error(f"Ошибка инициализации LLM: {e}")
             self.llm = None
 
+        # Шаблоны для определения запросов на генерацию кода/SQL
+        self._code_patterns = re.compile(
+            r'\b(sql|select|insert|update|delete|drop|create table|execute|eval|exec)\b|написать код|сгенерируй sql',
+            flags=re.IGNORECASE
+        )
+
+    def _is_code_request(self, text: str) -> bool:
+        if not text:
+            return False
+        return bool(self._code_patterns.search(text))
+
     async def generate_answer(self, 
                             question: str, 
                             context_docs: List[str],
                             deep_think: bool = False) -> str:
-        """Генерация ответа с учетом контекста"""
+        """Генерация ответа с учетом контекста. Блокируем генерацию кода/SQL."""
+        # Защитный слой: отказываем в генерации исполняемого кода/SQL прямо здесь
+        if self._is_code_request(question):
+            logger.info("Запрос на генерацию кода/SQL заблокирован: %s", question)
+            return "Извините, я не могу помогать с генерацией исполняемого кода или SQL-запросов по соображениям безопасности."
+
         if not self.llm:
             return self._fallback_answer(context_docs)
 

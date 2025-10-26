@@ -2,7 +2,8 @@ import os
 import pickle
 import hashlib
 from typing import Any, Dict
-import numpy as np
+# добавляем импорт
+from .logging_setup import suppress_stdout
 
 class EmbeddingCache:
     """Кэш для эмбеддингов с персистентностью"""
@@ -26,14 +27,20 @@ class EmbeddingCache:
         except Exception:
             pass
 
-    def get_embedding(self, text: str, embedder: Any) -> np.ndarray:
-        key = hashlib.md5(text.encode()).hexdigest()
+    def _key(self, text: str) -> str:
+        return hashlib.md5(text.encode()).hexdigest()
+
+    def get_embedding(self, text: str, embedder: Any) -> Any:
+        key = self._key(text)
         if key in self.cache:
             return self.cache[key]
-        embedding = embedder.encode([text])[0]
-        self.cache[key] = embedding
+        # Подавляем stdout/stderr во время вычисления эмбеддинга
+        with suppress_stdout():
+            embedding = embedder.encode([text])
+        emb = embedding[0] if isinstance(embedding, (list, tuple)) else embedding
+        self.cache[key] = emb
         self._save_cache()
-        return embedding
+        return emb
 
 class MemoryOptimizedCache:
     """Кэш с ограничением по памяти"""

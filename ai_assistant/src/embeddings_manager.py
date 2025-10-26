@@ -1,57 +1,99 @@
-from typing import List, Tuple
+from typing import List
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, util
 import asyncio
+# добавляем импорт suppress_stdout
+from .logging_setup import suppress_stdout
+import logging
+import os
 from .cache_manager import EmbeddingCache
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class EmbeddingsManager:
     """Управление эмбеддингами"""
     
     def __init__(self, model_name: str = "cointegrated/rubert-tiny2"):
-        try:
-            self.model = SentenceTransformer(model_name)
-        except Exception as e:
-            print(f"Ошибка загрузки модели эмбеддингов: {e}")
-            self.model = None
+        # Отключаем прогресс-бары/многопоточность до загрузки любых библиотек
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+        os.environ['HF_DISABLE_TQDM'] = '1'
+        os.environ['TQDM_DISABLE'] = '1'
+        os.environ['HF_DATASETS_PROGRESS_BAR'] = 'false'
+        os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
 
-    def precompute_embeddings(self, 
-                            documents: List[str],
-                            cache: EmbeddingCache) -> np.ndarray:
-        """Предварительное вычисление эмбеддингов документов"""
-        if not self.model or not documents:
-            return np.array([])
-            
-        embeddings = []
-        for doc in documents:
-            emb = cache.get_embedding(doc, self.model)
-            embeddings.append(emb)
-        return np.array(embeddings)
+        # Подменяем tqdm на "тихий" вариант (защита если библиотека уже импортирована)
+        try:
+            import tqdm
+            class _DummyTqdm:
+                def __init__(self, it=None, **kw):
+                    self._it = it
+                def __iter__(self):
+                    return iter(self._it or [])
+                def update(self, *a, **k): pass
+                def close(self): pass
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+            tqdm.tqdm = lambda it=None, **kw: _DummyTqdm(it)
+            try:
+                import tqdm.auto as _tq
+                _tq.tqdm = lambda it=None, **kw: _DummyTqdm(it)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        try:
+            # Подавляем stdout/stderr на время инициализации модели
+            with suppress_stdout():
+                self.model = SentenceTransformer(model_name)
+            logger.info(f"Модель эмбеддингов {model_name} успешно загружена")
+        except Exception as e:
+            logger.error(f"Ошибка инициализации модели эмбеддингов: {e}")
+            raise RuntimeError(f"Не удалось инициализировать модель эмбеддингов: {e}")
 
     async def get_embedding(self, text: str) -> np.ndarray:
-        """Асинхронное получение эмбеддинга"""
+        """Асинхронное получение эмбеддинга для текста (с подавлением вывода)"""
         if not self.model:
-            raise ValueError("Модель эмбеддингов не инициализирована")
-            
-        loop = asyncio.get_running_loop()
-        embedding = await loop.run_in_executor(
-            None,
-            self.model.encode,
-            [text]
-        )
-        return embedding[0]
+            raise RuntimeError("Модель эмбеддингов не инициализирована")
+        try:
+            loop = asyncio.get_running_loop()
+            # Подавляем вывод сторонних библиотек при вычислении эмбеддинга
+            with suppress_stdout():
+                embedding = await loop.run_in_executor(None, self.model.encode, [text])
+            return embedding[0]
+        except Exception as e:
+            logger.error(f"Ошибка получения эмбеддинга: {e}")
+            raise RuntimeError(f"Не удалось получить эмбеддинг: {e}")
 
-    async def find_similar(self,
-                          question: str,
-                          q_embedding: np.ndarray,
-                          doc_embeddings: np.ndarray,
-                          documents: List[str],
-                          top_k: int = 3) -> List[str]:
-        """Поиск похожих документов"""
+    def precompute_embeddings(self, documents: List[str], cache: EmbeddingCache) -> np.ndarray:
+        """Предварительное вычисление эмбеддингов с использованием кэша"""
+        if not documents:
+            return np.array([])
+            
+        try:
+            embeddings = []
+            for doc in documents:
+                emb = cache.get_embedding(doc, self.model)
+                embeddings.append(emb)
+            return np.array(embeddings)
+        except Exception as e:
+            logger.error(f"Ошибка предварительного вычисления эмбеддингов: {e}")
+            raise RuntimeError(f"Не удалось вычислить эмбеддинги: {e}")
+
+    async def find_similar(self, question: str, q_embedding: np.ndarray, 
+                         doc_embeddings: np.ndarray, documents: List[str], 
+                         top_k: int = 3) -> List[str]:
+        """Поиск похожих документов по эмбеддингам"""
         if doc_embeddings.size == 0:
             return []
             
-        # Вычисляем косинусное сходство
-        similarities = np.dot(doc_embeddings, q_embedding)
-        top_idx = np.argsort(similarities)[-top_k:][::-1]
-        
-        return [documents[i] for i in top_idx]
+        try:
+            # Вычисляем косинусное сходство
+            similarities = np.dot(doc_embeddings, q_embedding)
+            top_idx = np.argsort(similarities)[-top_k:][::-1]
+            
+            return [documents[i] for i in top_idx]
+        except Exception as e:
+            logger.error(f"Ошибка поиска похожих документов: {e}")
+            return []
