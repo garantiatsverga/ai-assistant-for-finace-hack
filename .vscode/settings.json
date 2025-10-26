@@ -1,0 +1,7 @@
+{
+    "python.analysis.extraPaths": [
+        "/workspaces/ai-assistant-for-finace-hack"
+    ],
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true
+}
