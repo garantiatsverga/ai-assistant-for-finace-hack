@@ -33,7 +33,7 @@ def main():
             if not question:
                 continue
                 
-            print(assistant.ask_sync(question))
+            assistant.ask_sync(question)
             
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}", exc_info=True)
