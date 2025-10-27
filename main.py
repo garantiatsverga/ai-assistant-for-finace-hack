@@ -1,43 +1,144 @@
 """Entry point for AI Assistant"""
 import os
 import sys
-from ai_assistant import SmartDeepThinkRAG
-from ai_assistant.src.logging_setup import setup_logging
+import asyncio
 
-def clear_screen():
-    """Очистка экрана"""
-    os.system('clear' if os.name == 'posix' else 'cls')
+# Добавляем текущую директорию в Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
-def main():
-    # Настраиваем логирование в файл
-    log_dir = os.path.join(os.path.dirname(__file__), 'logs')
-    log_file = os.path.join(log_dir, 'assistant.log')
-    logger = setup_logging(log_file)
+try:
+    from ai_assistant import SmartDeepThinkRAG
+    from ai_assistant.registration.auth_manager import AuthManager
+    from ai_assistant.registration.auth_ui import AuthUI
+    from ai_assistant.registration.database import DatabaseManager
+    from ai_assistant.src.logging_setup import setup_logging
     
-    try:
-        # Перенаправляем stdout в лог во время инициализации
-        original_stdout = sys.stdout
-        with open(log_file, 'a') as f:
-            sys.stdout = f
-            assistant = SmartDeepThinkRAG()
-            sys.stdout = original_stdout
+except ImportError as e:
+    print(f"❌ Ошибка импорта: {e}")
+    print("📁 Текущая директория:", current_dir)
+    print("📁 Содержимое текущей директории:")
+    for item in os.listdir(current_dir):
+        print(f"   - {item}")
+    
+    if os.path.exists('src'):
+        print("📁 Содержимое src/:")
+        for item in os.listdir('src'):
+            print(f"   - {item}")
+    
+    if os.path.exists('registration'):
+        print("📁 Содержимое registration/:")
+        for item in os.listdir('registration'):
+            print(f"   - {item}")
+    
+    sys.exit(1)
+
+class AIAssistantApp:
+    """Основное приложение AI Assistant с аутентификацией"""
+    
+    def __init__(self):
+        self.logger = setup_logging()
+        self.db_manager = None
+        self.auth_manager = None
+        self.auth_ui = None
+        self.assistant = None
+    
+    async def initialize(self):
+        """Инициализация приложения"""
+        try:
+            # Инициализация базы данных
+            connection_string = self._get_connection_string()
+            self.db_manager = DatabaseManager(connection_string)
+            await self.db_manager.connect()
+            
+            # Инициализация менеджеров
+            self.auth_manager = AuthManager(self.db_manager)
+            self.auth_ui = AuthUI(self.auth_manager)
+            
+            self.logger.info("Приложение инициализировано")
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка инициализации: {e}")
+            print(f"❌ Ошибка инициализации: {e}")
+            print("🔧 Проверьте настройки PostgreSQL")
+            raise
+    
+    def _get_connection_string(self) -> str:
+        """Получение строки подключения к PostgreSQL в Docker"""
+        return "postgresql://postgres@localhost:5432/bank_assistant"
+
+    async def run(self):
+        """Запуск основного цикла приложения"""
+        try:
+            await self.initialize()
+            
+            while True:
+                try:
+                    self.auth_ui.show_welcome()
+                    choice = self.auth_ui.get_menu_choice()
+                    
+                    if choice == '1':  # Вход
+                        if await self.auth_ui.handle_login():
+                            await self._run_assistant()
+                    
+                    elif choice == '2':  # Регистрация
+                        await self.auth_ui.handle_registration()
+                    
+                    elif choice == '3':  # Выход
+                        print("\n👋 До свидания!")
+                        break
+                        
+                except (KeyboardInterrupt, EOFError):
+                    print("\n👋 Работа завершена пользователем")
+                    break
+                    
+        except Exception as e:
+            self.logger.error(f"Критическая ошибка: {e}")
+            print(f"\n💥 Критическая ошибка: {e}")
+        finally:
+            if self.db_manager:
+                await self.db_manager.close()
+
+    async def _run_assistant(self):
+        """Запуск ассистента после успешной аутентификации"""
+        if not self.assistant:
+            self.assistant = SmartDeepThinkRAG()
         
-        clear_screen()
-        print("\nAI Assistant готов к работе!")
-        print("Для выхода введите 'exit' или 'quit'")
+        user = self.auth_manager.get_current_user()
+        self._show_assistant_welcome(user)
         
         while True:
-            question = input("\nВаш вопрос: ").strip()
-            if question.lower() in ['exit', 'quit', 'стоп']:
+            question = input("\n💬 Ваш вопрос: ").strip()
+            if question.lower() in ['exit', 'quit', 'выход', 'logout']:
+                self.auth_manager.logout()
+                print("👋 До свидания!")
                 break
             if not question:
                 continue
                 
-            assistant.ask_sync(question)
-            
+            self.assistant.ask_sync(question)
+    
+    def _show_assistant_welcome(self, user: dict):
+        """Отображение приветствия ассистента"""
+        import os
+        os.system('clear' if os.name == 'posix' else 'cls')
+        print(f"🎯 Добро пожаловать, {user['full_name']}!")
+        print(f"👤 Вы вошли как: {user['login']}")
+        print("🤖 AI Assistant готов к работе!")
+        print("💡 Для углубленного анализа добавьте '-deepthink' к вопросу")
+        print("🚪 Для выхода введите 'exit', 'quit' или 'выход'")
+        print("=" * 60)
+
+def main():
+    """Точка входа приложения"""
+    app = AIAssistantApp()
+    
+    try:
+        asyncio.run(app.run())
+    except KeyboardInterrupt:
+        print("\n👋 Работа завершена")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-        print("\nПроизошла ошибка. Подробности в логах.")
+        print(f"\n💥 Критическая ошибка: {e}")
         return 1
     
     return 0
