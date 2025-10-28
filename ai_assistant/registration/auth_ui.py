@@ -16,20 +16,21 @@ class AuthUI:
         os.system('clear' if os.name == 'posix' else 'cls')
     
     def show_welcome(self):
-        """Отображение приветственного экрана"""
+        """Отображение приветственного экрана с отладочной опцией"""
         self.clear_screen()
         print("🎯 БАНКОВСКИЙ ИИ-АССИСТЕНТ")
         print("=" * 50)
         print("1. Вход в систему")
         print("2. Регистрация")
         print("3. Выход")
+        print("4. 🚀 Отладочный вход (для разработки)")
         print("=" * 50)
     
     def get_menu_choice(self) -> str:
         """Получение выбора пользователя"""
         while True:
-            choice = input("\nВыберите действие (1-3): ").strip()
-            if choice in ['1', '2', '3']:
+            choice = input("\nВыберите действие (1-4): ").strip()
+            if choice in ['1', '2', '3', '4']:
                 return choice
             print("❌ Неверный выбор. Попробуйте снова.")
     
@@ -78,6 +79,44 @@ class AuthUI:
             input("\nНажмите Enter для продолжения...")
             return False
     
+    async def handle_debug_login(self) -> bool:
+        """Отладочный вход с ПРИНУДИТЕЛЬНЫМ входом"""
+        self.clear_screen()
+        print("🚀 ОТЛАДОЧНЫЙ РЕЖИМ (ПРИНУДИТЕЛЬНЫЙ)")
+        print("=" * 50)
+        
+        debug_user = {
+            'login': 'debug_user',
+            'password': 'debug123'
+        }
+        
+        print(f"👤 Логин: {debug_user['login']}")
+        print(f"🔑 Пароль: {debug_user['password']}")
+        
+        try:
+            print("\n🔐 Пробуем вход...")
+            
+            login_result = await self.auth.login(debug_user['login'], debug_user['password'])
+            
+            if login_result["success"]:
+                user = login_result["user"]
+                print(f"\n🎉 УСПЕШНЫЙ ВХОД!")
+                print(f"✅ Добро пожаловать, {user['full_name']}!")
+                
+                # 🎯 ВАЖНО: Возвращаем True для запуска ассистента
+                print("🔍 Возвращаем True для запуска ассистента...")
+                input("\nНажмите Enter для перехода к ассистенту...")
+                return True  # 🎯 ЭТО САМОЕ ВАЖНОЕ!
+            else:
+                print(f"❌ Ошибка входа: {login_result.get('error', 'Неизвестная ошибка')}")
+                input("\nНажмите Enter для продолжения...")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+            input("\nНажмите Enter для продолжения...")
+            return False
+        
     async def handle_registration(self) -> bool:
         """Обработка регистрации"""
         self.clear_screen()
@@ -135,8 +174,8 @@ class AuthUI:
                 
         except KeyboardInterrupt:
             print("\n\n❌ Регистрация прервана пользователем.")
-            return False
-    
+            return False    
+        
     def _get_valid_login(self) -> str:
         """Получение валидного логина"""
         while True:
@@ -148,7 +187,7 @@ class AuthUI:
                     print("❌ Логин может содержать только латинские буквы, цифры и подчеркивание")
             else:
                 print("❌ Логин должен содержать от 3 до 50 символов")
-    
+
     def _get_valid_password(self) -> str:
         """Получение пароля с звездочками через stdiomask"""
         try:
@@ -272,3 +311,120 @@ class AuthUI:
         
         confirm = input("\nПодтвердить регистрацию? (да/нет): ").strip().lower()
         return confirm in ['да', 'д', 'yes', 'y']
+    
+    async def handle_debug_login(self) -> bool:
+        """Обработка отладочного входа с выбором пользователя"""
+        self.clear_screen()
+        print("🚀 ОТЛАДОЧНЫЙ РЕЖИМ ДЛЯ РАЗРАБОТКИ")
+        print("=" * 50)
+        print("⚠️  ВНИМАНИЕ: Этот режим пропускает проверку пароля!")
+        print("=" * 50)
+        
+        # Получаем список пользователей из базы
+        available_users = await self._get_available_users()
+        
+        if not available_users:
+            print("❌ В базе данных нет пользователей для отладки")
+            print("📝 Сначала зарегистрируйте пользователя через обычную регистрацию")
+            input("\nНажмите Enter для продолжения...")
+            return False
+        
+        # Показываем список доступных пользователей
+        print("\n📋 Доступные пользователи:")
+        for i, user in enumerate(available_users, 1):
+            print(f"{i}. {user['login']} - {user['full_name']} ({user['email']})")
+        
+        print(f"{len(available_users) + 1}. Создать тестового пользователя")
+        print("0. Отмена")
+        
+        while True:
+            try:
+                choice = input("\nВыберите пользователя: ").strip()
+                
+                if choice == '0':
+                    return False
+                
+                if choice == str(len(available_users) + 1):
+                    # Создаем тестового пользователя
+                    return await self._create_debug_user()
+                
+                choice_num = int(choice)
+                if 1 <= choice_num <= len(available_users):
+                    selected_user = available_users[choice_num - 1]
+                    result = await self.auth.debug_login(selected_user['login'])
+                    
+                    if result["success"]:
+                        user = result["user"]
+                        print(f"\n🎉 УСПЕШНЫЙ ОТЛАДОЧНЫЙ ВХОД!")
+                        print(f"✅ Добро пожаловать, {user['full_name']}!")
+                        print(f"👤 Логин: {user['login']}")
+                        print(f"📧 Email: {user['email']}")
+                        print(f"📱 Телефон: {user['phone']}")
+                        
+                        input("\n🎯 Нажмите Enter для перехода к ассистенту...")
+                        return True
+                    else:
+                        print(f"❌ Ошибка входа: {result.get('error', 'Неизвестная ошибка')}")
+                        return False
+                else:
+                    print("❌ Неверный выбор. Попробуйте снова.")
+                    
+            except ValueError:
+                print("❌ Введите номер из списка.")
+            except Exception as e:
+                print(f"❌ Ошибка: {e}")
+                return False
+
+    async def _get_available_users(self) -> list:
+        """Получение списка пользователей из базы"""
+        try:
+            async with self.auth.db.pool.acquire() as conn:
+                users = await conn.fetch('''
+                    SELECT login, email, full_name, phone 
+                    FROM users 
+                    WHERE is_active = TRUE 
+                    ORDER BY created_at DESC 
+                    LIMIT 10
+                ''')
+                return [dict(user) for user in users]
+        except Exception as e:
+            print(f"❌ Ошибка получения пользователей: {e}")
+            return []
+
+    async def _create_debug_user(self) -> bool:
+        """Создание тестового пользователя"""
+        from datetime import date
+        
+        try:
+            debug_data = {
+                'login': f"debug_user_{date.today().strftime('%Y%m%d')}",
+                'password': 'debug123',
+                'email': f"debug_{date.today().strftime('%Y%m%d')}@test.ru",
+                'full_name': 'Тестовый Пользователь',
+                'passport_series': '1234',
+                'passport_number': '567890',
+                'birth_date': date(1990, 1, 1),
+                'phone': '79990000000'
+            }
+            
+            result = await self.auth.register(**debug_data)
+            
+            if result["success"]:
+                print(f"\n✅ Создан тестовый пользователь: {debug_data['login']}")
+                print("🔑 Пароль: debug123")
+                
+                # Автоматически входим под созданным пользователем
+                login_result = await self.auth.debug_login(debug_data['login'])
+                if login_result["success"]:
+                    user = login_result["user"]
+                    print(f"\n🎉 АВТОМАТИЧЕСКИЙ ВХОД ПОД {user['full_name']}!")
+                    input("\n🎯 Нажмите Enter для перехода к ассистенту...")
+                    return True
+            else:
+                print(f"❌ Ошибка создания пользователя: {result.get('error', 'Неизвестная ошибка')}")
+                
+            return False
+            
+        except Exception as e:
+            print(f"❌ Ошибка создания тестового пользователя: {e}")
+            return False

@@ -198,15 +198,14 @@ class DatabaseManager:
             return None
     
     def _validate_registration_data(self,
-                                  login: str,
-                                  password: str,
-                                  email: str,
-                                  full_name: str,
-                                  passport_series: str,
-                                  passport_number: str,
-                                  birth_date: date,
-                                  phone: str) -> Dict[str, Any]:
-        """Валидация данных регистрации"""
+                                login: str,
+                                password: str,
+                                email: str,
+                                full_name: str,
+                                passport_series: str,
+                                passport_number: str,
+                                birth_date: date,
+                                phone: str) -> Dict[str, Any]:
         
         # Проверка логина
         if len(login) < 3 or len(login) > 50:
@@ -240,10 +239,10 @@ class DatabaseManager:
             return {"success": False, "error": "Номер паспорта должен состоять из 6 цифр"}
         
         # Проверка даты рождения
-        if birth_date > date.today():
+        if birth_date > date.today():  # 🎯 Работаем с date объектом
             return {"success": False, "error": "Дата рождения не может быть в будущем"}
         
-        age = self._calculate_age(birth_date)
+        age = self._calculate_age(birth_date)  # 🎯 Передаем date объект
         if age < 18:
             return {"success": False, "error": "Регистрация доступна только с 18 лет"}
         if age > 120:

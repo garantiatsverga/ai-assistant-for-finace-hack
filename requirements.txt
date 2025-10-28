@@ -12,3 +12,6 @@ transformers>=4.30.0
 tokenizers>=0.13.0
 tqdm>=4.64.0
 colorama>=0.4.6
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0

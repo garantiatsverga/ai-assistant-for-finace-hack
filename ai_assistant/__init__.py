@@ -8,7 +8,7 @@ from ai_assistant.src.dialogue_memory import DialogueMemory
 from ai_assistant.src.llm_adapter import LLMAdapter, LLMError
 from ai_assistant.src.embeddings_manager import EmbeddingsManager
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "SmartDeepThinkRAG",

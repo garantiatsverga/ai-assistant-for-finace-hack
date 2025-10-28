@@ -4,14 +4,19 @@ import asyncio
 import logging
 import os
 import time
+import sys
 
-from ..src.cache_manager import EmbeddingCache
-from ..src.config_manager import ConfigManager
-from ..src.security_checker import SecurityChecker
-from ..src.metrics_collector import MetricsCollector
-from ..src.dialogue_memory import DialogueMemory
-from ..src.llm_adapter import LLMAdapter, LLMError
-from ..src.embeddings_manager import EmbeddingsManager
+# Добавляем путь для импортов
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, current_dir)
+
+from .cache_manager import EmbeddingCache
+from .config_manager import ConfigManager
+from .security_checker import SecurityChecker
+from .metrics_collector import MetricsCollector
+from .dialogue_memory import DialogueMemory
+from .llm_adapter import LLMAdapter, LLMError
+from .embeddings_manager import EmbeddingsManager
 
 logger = logging.getLogger(__name__)
 
@@ -84,36 +89,44 @@ class SmartDeepThinkRAG:
         return []
 
     async def ask_streaming(self, question: str) -> AsyncGenerator[str, None]:
-        """Асинхронный метод со detailed tracing"""
+        """Асинхронный метод со detailed tracing и поддержкой флагов"""
         start_time = time.time()
         
         try:
             logger.info("🔧 [1] Начало ask_streaming")
             
+            # Извлекаем флаги из вопроса
+            clean_question, flags = self.security._extract_flags(question)
+            
+            # Показываем активные флаги
+            if flags:
+                yield f"\n🎛️ Активные флаги: {', '.join(flags)}\n"
+            
             # Сохраняем оригинальный вопрос для метрик
             original_question = question
             
-            # Проверяем режим deep think
-            deepthink_mode = question.endswith(" -deepthink")
+            # Проверяем режим deep think (учитываем флаги)
+            deepthink_mode = question.endswith(" -deepthink") and '-nodeep' not in flags
             if deepthink_mode:
-                question = question[:-10].strip()
+                clean_question = clean_question[:-10].strip()
                 
             logger.info("🔧 [2] Исправляем раскладку")
-            question = self._fix_keyboard_layout(question)
+            clean_question = self._fix_keyboard_layout(clean_question)
             
             logger.info("🔧 [3] Проверяем безопасность")
-            is_safe, reason = await self.security.check(question)
+            is_safe, reason = await self.security.check(question)  # Проверяем оригинальный вопрос с флагами
+            
             if not is_safe:
                 logger.info("🔧 [3a] Запрос заблокирован")
                 yield reason
                 return
             
             logger.info("🔧 [4] Получаем эмбеддинг вопроса")
-            question_embedding = await self.embedding_manager.get_embedding(question)
+            question_embedding = await self.embedding_manager.get_embedding(clean_question)
             
             logger.info("🔧 [5] Ищем похожие документы")
             similar_docs = await self.embedding_manager.find_similar(
-                question,
+                clean_question,
                 question_embedding,
                 self.doc_embeddings,
                 self.documents,
@@ -123,20 +136,28 @@ class SmartDeepThinkRAG:
             logger.info(f"🔧 [5a] Найдено документов: {len(similar_docs)}")
             
             # Добавляем сообщение в память диалога
-            self.memory.add_message('user', question)
+            self.memory.add_message('user', clean_question)
             
             # Генерация ответа со стримингом
             full_response = ""
             
             # Сначала выводим индикатор начала ответа
             logger.info("🔧 [6] Отправляем индикатор ответа")
-            yield "\n🤖 Ответ: "
+            
+            # Показываем информацию о режиме
+            if '-simple' in flags:
+                yield "\n🤖 [ПРОСТОЙ РЕЖИМ] "
+            elif flags:
+                yield f"\n🤖 [РЕЖИМ: {', '.join(flags)}] "
+            else:
+                yield "\n🤖 Ответ: "
             
             # Затем стримим ответ от модели
             logger.info("🔧 [7] Начинаем стриминг от LLM")
             chunk_count = 0
-        
-            async for chunk in self.llm.generate_answer_streaming(question, similar_docs, deepthink_mode):
+            
+            # Передаем флаги в LLM для адаптации ответа
+            async for chunk in self.llm.generate_answer_streaming(clean_question, similar_docs, deepthink_mode, flags):
                 logger.info(f"🔧 [7a] Получен chunk #{chunk_count}: '{chunk}'")
                 chunk_count += 1
                 yield chunk

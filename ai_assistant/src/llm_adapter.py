@@ -45,19 +45,23 @@ class LLMAdapter:
     async def generate_answer_streaming(self, 
                                     question: str, 
                                     context_docs: List[str],
-                                    deep_think: bool = False) -> AsyncGenerator[str, None]:
-        """Генерация ответа со стримингом с tracing"""
+                                    deep_think: bool = False,
+                                    flags: List[str] = None) -> AsyncGenerator[str, None]:
+        """Генерация ответа со стримингом с поддержкой флагов"""
         
-        logger.info("🔧 [LLM-1] Начало generate_answer_streaming")
+        if flags is None:
+            flags = []
         
-        # Защитный слой: отказываем в генерации исполняемого кода/SQL
-        if self._is_code_request(question):
+        logger.info(f"🔧 [LLM-1] Начало generate_answer_streaming. Флаги: {flags}")
+        
+        # Защитный слой: отказываем в генерации исполняемого кода/SQL (если не отключено флагом)
+        if self._is_code_request(question) and '-nocode' not in flags:
             logger.info("🔧 [LLM-1a] Запрос заблокирован (код/SQL)")
             yield "Извините, я не могу помогать с генерацией исполняемого кода или SQL-запросов по соображениям безопасности."
             return
 
         logger.info("🔧 [LLM-2] Создаем промпт")
-        prompt = self._create_prompt(question, context_docs, deep_think)
+        prompt = self._create_prompt(question, context_docs, deep_think, flags)
         
         logger.info("🔧 [LLM-3] Начинаем стриминг от Ollama")
         try:
@@ -65,6 +69,11 @@ class LLMAdapter:
             async for chunk in self._stream_from_ollama(prompt):
                 logger.info(f"🔧 [LLM-3a] Отправляем chunk #{chunk_count}: '{chunk}'")
                 chunk_count += 1
+                
+                # Если активен простой режим, убираем лишние формальности
+                if '-simple' in flags:
+                    chunk = self._simplify_response(chunk)
+                    
                 yield chunk
                     
             logger.info(f"🔧 [LLM-4] generate_answer_streaming завершен. Чанков: {chunk_count}")
@@ -156,19 +165,27 @@ class LLMAdapter:
     def _create_prompt(self, 
                     question: str, 
                     context_docs: List[str],
-                    deep_think: bool) -> str:
-        """Упрощенный промпт для тестирования"""
+                    deep_think: bool,
+                    flags: List[str]) -> str:
+        """Создание промпта с учетом флагов"""
         
         context_text = "\n".join(context_docs) if context_docs else "Информация не найдена"
         
-        prompt = f"""Ответь на вопрос: {question}
+        # Базовый промпт
+        base_prompt = f"""Ответь на вопрос: {question}
 
     Информация для ответа:
     {context_text}
 
     Ответ:"""
         
-        return prompt
+        # Адаптируем промпт в зависимости от флагов
+        if '-simple' in flags:
+            base_prompt = f"""Вопрос: {question}
+    Данные: {context_text}
+    Краткий ответ:"""
+        
+        return base_prompt
     
     def _fallback_answer(self, context_docs: List[str]) -> str:
         """Ответ при ошибке LLM"""
@@ -179,3 +196,18 @@ class LLMAdapter:
             [f"• {doc[:100]}..." if len(doc) > 100 else f"• {doc}" 
              for doc in context_docs[:3]]
         )
+
+    def _simplify_response(self, text: str) -> str:
+        """Упрощение ответа для простого режима"""
+        # Убираем формальные обращения и лишние слова
+        simplifications = {
+            "Конечно,": "",
+            "Рад помочь!": "",
+            "Вот ответ на ваш вопрос:": "",
+            "Согласно предоставленной информации,": ""
+        }
+        
+        for old, new in simplifications.items():
+            text = text.replace(old, new)
+        
+        return text.strip()
