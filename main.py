@@ -2,6 +2,9 @@
 import os
 import sys
 import asyncio
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 # Добавляем текущую директорию в Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -100,24 +103,43 @@ class AIAssistantApp:
                 await self.db_manager.close()
 
     async def _run_assistant(self):
-        """Запуск ассистента после успешной аутентификации"""
+        """Запуск ассистента с синхронным вводом в executor"""
         if not self.assistant:
             self.assistant = SmartDeepThinkRAG()
         
         user = self.auth_manager.get_current_user()
         self._show_assistant_welcome(user)
         
+        import asyncio
+        
         while True:
-            question = input("\n💬 Ваш вопрос: ").strip()
-            if question.lower() in ['exit', 'quit', 'выход', 'logout']:
-                self.auth_manager.logout()
-                print("👋 До свидания!")
-                break
-            if not question:
-                continue
+            try:
+                # Запускаем input в thread executor чтобы не блокировать event loop
+                loop = asyncio.get_event_loop()
+                question = await loop.run_in_executor(
+                    None, input, "\n💬 Ваш вопрос: "
+                )
+                question = question.strip()
                 
-            self.assistant.ask_sync(question)
-    
+                if not question:
+                    continue
+                    
+                if question.lower() in ['exit', 'quit', 'выход', 'logout']:
+                    self.auth_manager.logout()
+                    print("👋 До свидания!")
+                    break
+                    
+                await self.assistant.ask_streaming_wrapper(question)
+                
+            except KeyboardInterrupt:
+                print("\n👋 До свидания!")
+                self.auth_manager.logout()
+                break
+            except EOFError:
+                print("\n👋 До свидания!")
+                self.auth_manager.logout()
+                break
+
     def _show_assistant_welcome(self, user: dict):
         """Отображение приветствия ассистента"""
         import os
