@@ -42,10 +42,24 @@ class AuthUI:
         print("=" * 40)
         
         identifier = input("Логин/Email/Телефон: ").strip()
-        password = getpass.getpass("Пароль: ")
         
-        if not identifier or not password:
-            print("\n❌ Все поля обязательны для заполнения!")
+        if not identifier:
+            print("\n❌ Введите логин, email или телефон!")
+            input("\nНажмите Enter для продолжения...")
+            return False
+        
+        try:
+            # Пароль со звездочками
+            import stdiomask
+            password = stdiomask.getpass("Пароль: ", mask='*')
+        except ImportError:
+            # Fallback если библиотека не установлена
+            import getpass
+            print("⚠️  Установите 'pip install stdiomask' для отображения звездочек")
+            password = getpass.getpass("Пароль: ")
+        
+        if not password:
+            print("\n❌ Введите пароль!")
             input("\nНажмите Enter для продолжения...")
             return False
         

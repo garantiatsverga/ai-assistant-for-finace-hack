@@ -43,31 +43,38 @@ class LLMAdapter:
             await session.close()
 
     async def generate_answer_streaming(self, 
-                                      question: str, 
-                                      context_docs: List[str],
-                                      deep_think: bool = False) -> AsyncGenerator[str, None]:
-        """Генерация ответа со стримингом в реальном времени"""
+                                    question: str, 
+                                    context_docs: List[str],
+                                    deep_think: bool = False) -> AsyncGenerator[str, None]:
+        """Генерация ответа со стримингом с tracing"""
+        
+        logger.info("🔧 [LLM-1] Начало generate_answer_streaming")
         
         # Защитный слой: отказываем в генерации исполняемого кода/SQL
         if self._is_code_request(question):
+            logger.info("🔧 [LLM-1a] Запрос заблокирован (код/SQL)")
             yield "Извините, я не могу помогать с генерацией исполняемого кода или SQL-запросов по соображениям безопасности."
             return
 
+        logger.info("🔧 [LLM-2] Создаем промпт")
         prompt = self._create_prompt(question, context_docs, deep_think)
         
+        logger.info("🔧 [LLM-3] Начинаем стриминг от Ollama")
         try:
+            chunk_count = 0
             async for chunk in self._stream_from_ollama(prompt):
+                logger.info(f"🔧 [LLM-3a] Отправляем chunk #{chunk_count}: '{chunk}'")
+                chunk_count += 1
                 yield chunk
-                
-        except asyncio.TimeoutError:
-            logger.error("Таймаут при генерации ответа")
-            yield "⏰ Превышено время ожидания ответа. Попробуйте позже."
+                    
+            logger.info(f"🔧 [LLM-4] generate_answer_streaming завершен. Чанков: {chunk_count}")
+            
         except Exception as e:
-            logger.error(f"Ошибка генерации ответа: {e}")
+            logger.error(f"🔧 [LLM-ERROR] Ошибка в generate_answer_streaming: {e}")
             yield self._fallback_answer(context_docs)
 
     async def _stream_from_ollama(self, prompt: str) -> AsyncGenerator[str, None]:
-        """Потоковое получение ответа от Ollama API с защитой от повторений"""
+        """Правильное потоковое получение ответа от Ollama API"""
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": self.model_name,
@@ -76,52 +83,64 @@ class LLMAdapter:
             "options": {
                 "temperature": 0.1,
                 "top_p": 0.9,
-                "num_predict": 800,  # Уменьшим длину ответа
-                "repeat_penalty": 1.3,  # Увеличим штраф за повторения
-                "stop": ["\n\n", "###", "Кредит - это"]  # Стоп-слова для предотвращения зацикливания
+                "num_predict": 500,
+                "repeat_penalty": 1.2
             }
         }
         
-        last_chunk = ""
-        chunk_count = 0
+        logger.info(f"🔧 Отправляем запрос к Ollama...")
         
         async with self._create_session() as session:
             try:
                 async with session.post(url, json=payload) as response:
+                    logger.info(f"🔧 Статус ответа: {response.status}")
+                    
                     if response.status != 200:
                         error_text = await response.text()
-                        logger.error(f"Ошибка Ollama API: {response.status} - {error_text}")
+                        logger.error(f"❌ Ошибка Ollama API: {response.status} - {error_text}")
                         yield "❌ Ошибка соединения с моделью."
                         return
                     
-                    async for line in response.content:
-                        if line:
-                            line_text = line.decode('utf-8').strip()
-                            if line_text:
-                                try:
-                                    data = json.loads(line_text)
+                    logger.info("🔧 Начинаем чтение потока...")
+                    
+                    # Читаем поток построчно
+                    async for line_bytes in response.content:
+                        if line_bytes:
+                            line = line_bytes.decode('utf-8').strip()
+                            
+                            # Пропускаем пустые строки
+                            if not line:
+                                continue
+                                
+                            try:
+                                data = json.loads(line)
+                                
+                                # Проверяем завершение
+                                if data.get('done', False):
+                                    logger.info("🔧 Стриминг завершен")
+                                    break
+                                
+                                # Отправляем response если есть
+                                if 'response' in data and data['response']:
+                                    yield data['response']
                                     
-                                    if data.get('done', False):
-                                        break
+                            except json.JSONDecodeError:
+                                logger.warning(f"🔧 Невалидный JSON: {line}")
+                                continue
+                            except Exception as e:
+                                logger.warning(f"🔧 Ошибка обработки: {e}")
+                                continue
+                    
+                    logger.info("🔧 Поток завершен")
                                     
-                                    if 'response' in data and data['response']:
-                                        chunk = data['response']
-                                        
-                                        # Защита от повторений - пропускаем если chunk похож на предыдущий
-                                        if chunk != last_chunk:
-                                            yield chunk
-                                            last_chunk = chunk
-                                            chunk_count += 1
-                                        
-                                        # Ограничиваем максимальное количество чанков
-                                        if chunk_count > 500:
-                                            break
-                                        
-                                except json.JSONDecodeError:
-                                    continue
-                                    
+            except asyncio.TimeoutError:
+                logger.error("⏰ Таймаут при стриминге")
+                yield "⏰ Превышено время ожидания ответа."
+            except aiohttp.ClientConnectorError:
+                logger.error("🔌 Не удалось подключиться к Ollama")
+                yield "🔌 Не удалось подключиться к языковой модели."
             except Exception as e:
-                logger.error(f"Ошибка при стриминге: {e}")
+                logger.error(f"💥 Неожиданная ошибка: {e}")
                 yield "❌ Произошла ошибка при генерации ответа."
 
     async def generate_answer(self, 
@@ -138,42 +157,18 @@ class LLMAdapter:
                     question: str, 
                     context_docs: List[str],
                     deep_think: bool) -> str:
-        """Строгий промпт с акцентом на использование контекста"""
+        """Упрощенный промпт для тестирования"""
         
-        # Проверяем контекст
-        if context_docs and context_docs[0] != "Информация по вашему запросу не найдена в базе знаний.":
-            context_text = "ДОСТУПНАЯ ИНФОРМАЦИЯ:\n" + "\n".join([f"• {doc}" for doc in context_docs])
-            context_status = "ИНФОРМАЦИЯ_НАЙДЕНА"
-        else:
-            context_text = "ИНФОРМАЦИЯ НЕ НАЙДЕНА"
-            context_status = "ИНФОРМАЦИЯ_НЕ_НАЙДЕНА"
+        context_text = "\n".join(context_docs) if context_docs else "Информация не найдена"
         
-        base_prompt = f"""Ты - ассистент банка. Отвечай ТОЛЬКО на основе информации ниже.
+        prompt = f"""Ответь на вопрос: {question}
 
+    Информация для ответа:
     {context_text}
 
-    ВОПРОС: {question}
-    СТАТУС_КОНТЕКСТА: {context_status}
-
-    ЖЕСТКИЕ ПРАВИЛА:
-    - ЕСЛИ СТАТУС_КОНТЕКСТА = "ИНФОРМАЦИЯ_НЕ_НАЙДЕНА" → ответь: "Информация по вашему запросу не найдена в базе знаний."
-    - ЕСЛИ СТАТУС_КОНТЕКСТА = "ИНФОРМАЦИЯ_НАЙДЕНА" → используй ТОЛЬКО информацию из контекста
-    - НЕ добавляй приветствия, вступления, заключения
-    - НЕ придумывай информацию
-    - Ответ должен быть КРАТКИМ (1-2 предложения)
-
-    ПРИМЕРЫ:
-    ВОПРОС: Что такое кредит?
-    КОНТЕКСТ: • КРЕДИТ: Деньги банка на 1-5 лет под 12-18% годовых.
-    ОТВЕТ: Кредит - это деньги банка на 1-5 лет под 12-18% годовых.
-
-    ВОПРОС: Что такое инвестиции?  
-    КОНТЕКСТ: ИНФОРМАЦИЯ НЕ НАЙДЕНА
-    ОТВЕТ: Информация по вашему запросу не найдена в базе знаний.
-
-    ОТВЕТ:"""
+    Ответ:"""
         
-        return base_prompt    
+        return prompt
     
     def _fallback_answer(self, context_docs: List[str]) -> str:
         """Ответ при ошибке LLM"""

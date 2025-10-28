@@ -84,10 +84,12 @@ class SmartDeepThinkRAG:
         return []
 
     async def ask_streaming(self, question: str) -> AsyncGenerator[str, None]:
-        """Асинхронный метод обработки вопроса со стримингом в реальном времени"""
+        """Асинхронный метод со detailed tracing"""
         start_time = time.time()
         
         try:
+            logger.info("🔧 [1] Начало ask_streaming")
+            
             # Сохраняем оригинальный вопрос для метрик
             original_question = question
             
@@ -96,19 +98,20 @@ class SmartDeepThinkRAG:
             if deepthink_mode:
                 question = question[:-10].strip()
                 
-            # Исправляем раскладку
+            logger.info("🔧 [2] Исправляем раскладку")
             question = self._fix_keyboard_layout(question)
             
-            # Проверяем безопасность
+            logger.info("🔧 [3] Проверяем безопасность")
             is_safe, reason = await self.security.check(question)
             if not is_safe:
+                logger.info("🔧 [3a] Запрос заблокирован")
                 yield reason
                 return
             
-            # Получаем эмбеддинг вопроса
+            logger.info("🔧 [4] Получаем эмбеддинг вопроса")
             question_embedding = await self.embedding_manager.get_embedding(question)
             
-            # Ищем релевантные документы
+            logger.info("🔧 [5] Ищем похожие документы")
             similar_docs = await self.embedding_manager.find_similar(
                 question,
                 question_embedding,
@@ -117,6 +120,8 @@ class SmartDeepThinkRAG:
                 top_k=self.config['rag']['top_k_documents']
             )
             
+            logger.info(f"🔧 [5a] Найдено документов: {len(similar_docs)}")
+            
             # Добавляем сообщение в память диалога
             self.memory.add_message('user', question)
             
@@ -124,13 +129,20 @@ class SmartDeepThinkRAG:
             full_response = ""
             
             # Сначала выводим индикатор начала ответа
+            logger.info("🔧 [6] Отправляем индикатор ответа")
             yield "\n🤖 Ответ: "
             
             # Затем стримим ответ от модели
+            logger.info("🔧 [7] Начинаем стриминг от LLM")
+            chunk_count = 0
+        
             async for chunk in self.llm.generate_answer_streaming(question, similar_docs, deepthink_mode):
-                if chunk:
-                    yield chunk
-                    full_response += chunk
+                logger.info(f"🔧 [7a] Получен chunk #{chunk_count}: '{chunk}'")
+                chunk_count += 1
+                yield chunk
+                full_response += chunk
+            
+            logger.info(f"🔧 [8] Стриминг завершен. Чанков: {chunk_count}")
             
             # Добавляем ответ в память
             self.memory.add_message('assistant', full_response)
@@ -138,48 +150,53 @@ class SmartDeepThinkRAG:
             # В конце выводим время ответа
             response_time = time.time() - start_time
             time_info = f"\n\n⏱️ Время ответа: {response_time:.2f} сек"
+            logger.info(f"🔧 [9] Отправляем время ответа: {response_time:.2f}сек")
             yield time_info
             
             # Сбор метрик
             intent, _ = self.security.analyze_intent(original_question)
             self.metrics.log_query(original_question, intent, response_time, True)
             
-        except RuntimeError as e:
-            logger.error(f"Ошибка при обработке вопроса: {e}")
-            yield "😔 Извините, произошла техническая ошибка. Попробуйте повторить запрос позже."
+            logger.info("🔧 [10] Ask_streaming завершен успешно")
+            
         except Exception as e:
-            logger.error(f"Неожиданная ошибка: {e}")
-            yield "❌ Произошла непредвиденная ошибка. Пожалуйста, обратитесь к администратору."
+            logger.error(f"💥 Критическая ошибка в ask_streaming: {e}", exc_info=True)
+            yield f"❌ Произошла ошибка: {e}"
 
     async def ask(self, question: str) -> str:
-        """Асинхронный метод для обратной совместимости (без стриминга)"""
+        """Асинхронный метод для прямого вызова из main.py"""
         full_response = ""
         async for chunk in self.ask_streaming(question):
+            print(chunk, end='', flush=True)
             full_response += chunk
+        print()  # Конечный перенос строки
         return full_response
+    
+    async def ask_streaming_wrapper(self, question: str) -> None:
+        """Обертка для вывода стриминга напрямую в консоль"""
+        async for chunk in self.ask_streaming(question):
+            print(chunk, end='', flush=True)
+        print()  # Конечный перенос строки
 
     def ask_sync(self, question: str) -> str:
-        """Синхронная обертка с посимвольным выводом в реальном времени"""
+        """Синхронная обертка для использования в асинхронном контексте"""
+        import asyncio
         
-        print("\n🤖 Обрабатываю запрос...", end='', flush=True)
-        
-        async def process_question():
-            first_chunk = True
-            full_response = ""
-            
-            async for chunk in self.ask_streaming(question):
-                if first_chunk and chunk == "\n🤖 Ответ: ":
-                    print("\r" + " " * 30 + "\r", end='')  # Очищаем строку "Обрабатываю запрос..."
-                    print("🤖 Ответ: ", end='', flush=True)
-                    first_chunk = False
-                else:
-                    print(chunk, end='', flush=True)
-                    full_response += chunk
-            
-            print()  # Конечный перенос строки
-            return full_response
-        
-        return asyncio.run(process_question())
+        # Просто запускаем асинхронную функцию и возвращаем результат
+        # Без создания новых event loops
+        try:
+            # Пробуем получить текущий loop
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Если loop уже запущен, используем asyncio.run_coroutine_threadsafe
+                future = asyncio.run_coroutine_threadsafe(self.ask(question), loop)
+                return future.result()
+            else:
+                # Если loop не запущен, используем run_until_complete
+                return loop.run_until_complete(self.ask(question))
+        except RuntimeError:
+            # Если нет event loop, создаем новый
+            return asyncio.run(self.ask(question))
 
     def _fix_keyboard_layout(self, text: str) -> str:
         """Исправление текста, набранного в английской раскладке вместо русской"""
