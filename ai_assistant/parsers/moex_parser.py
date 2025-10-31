@@ -39,7 +39,6 @@ class MOEXParser:
         
         try:
             url = f"{self.BASE_URL}/engines/stock/markets/shares/boards/TQBR/securities/{symbol}.json"
-            self.logger.info(f"Запрос к MOEX: {url}")
             
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
@@ -175,4 +174,3 @@ class MOEXParser:
         """Закрытие сессии"""
         if self.session and not self.session.closed:
             await self.session.close()
-            self.logger.info("Сессия MOEX парсера закрыта")

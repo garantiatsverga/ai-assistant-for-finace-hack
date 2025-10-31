@@ -1,4 +1,4 @@
-"""AI Assistant package initialization"""
+"""Инициализация компонентов ИИ-ассистента"""
 from ai_assistant.src.ai_assistant import SmartDeepThinkRAG
 from ai_assistant.src.cache_manager import EmbeddingCache, MemoryOptimizedCache
 from ai_assistant.src.config_manager import ConfigManager

@@ -8,5 +8,14 @@
     "top_k_documents": 3,
     "chunk_size": 500,
     "chunk_overlap": 50
+  },
+  "qdrant": {
+    "host": "localhost",
+    "port": 6333,
+    "collection_name": "financial_documents",
+    "enabled": true
+  },
+  "embedder": {
+    "model_name": "cointegrated/rubert-tiny2"
   }
 }

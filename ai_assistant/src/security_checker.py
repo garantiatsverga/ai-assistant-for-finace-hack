@@ -58,8 +58,8 @@ class SecurityChecker:
         
         # Если флаг -notrigger активен, пропускаем все проверки
         if '-notrigger' in flags:
-            logger.info("🔓 Режим -notrigger: проверки безопасности отключены")
-            return True, "🔓 Режим без триггеров активирован"
+            logger.info("Режим -notrigger: проверки безопасности отключены")
+            return True, "Рeжим без триггеров активирован"
         
         text_l = clean_text.lower()
 
@@ -68,7 +68,7 @@ class SecurityChecker:
             if pattern in text_l:
                 # Если флаг -nocode активен и это код-запрос, пропускаем
                 if '-nocode' in flags and any(code_word in pattern for code_word in ['код', 'sql', 'команду']):
-                    logger.info("🔓 Режим -nocode: проверка кода отключена")
+                    logger.info("Режим -nocode: проверка кода отключена")
                     continue
                     
                 msg = self.rules.get('rejection_messages', {}).get(

@@ -13,7 +13,7 @@ try:
     PARSERS_AVAILABLE = True
 except ImportError as e:
     PARSERS_AVAILABLE = False
-    print(f"⚠️  Парсеры финансовых данных недоступны: {e}")
+    print(f"Парсеры финансовых данных недоступны: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +30,12 @@ class FinancialAssistant(SmartDeepThinkRAG):
             try:
                 self.financial_parser = FinancialDataParser()
                 self.alerts_manager = PriceAlertsManager()
-                logger.info("✅ Финансовые парсеры инициализированы")
+                logger.info("Финансовые парсеры инициализированы")
             except Exception as e:
-                logger.error(f"❌ Ошибка инициализации парсеров: {e}")
+                logger.error(f"Ошибка инициализации парсеров: {e}")
                 self.financial_parser = None
         else:
-            logger.warning("⚠️  Финансовые парсеры недоступны")
+            logger.warning("Финансовые парсеры недоступны")
     
     async def ask_streaming(self, question: str) -> AsyncGenerator[str, None]:
         """ПЕРЕОПРЕДЕЛЯЕМ streaming метод для финансовых запросов"""
@@ -45,9 +45,9 @@ class FinancialAssistant(SmartDeepThinkRAG):
         financial_response = await self._handle_financial_question(question)
         if financial_response is not None:
             # Если это финансовый запрос, возвращаем ответ как стрим
-            yield "\n🤖 Ответ: "
+            yield "\nОтвет: "
             yield financial_response
-            yield f"\n\n⏱️ Время ответа: {time.time() - start_time:.2f} сек"
+            yield f"\n\n⏱Время ответа: {time.time() - start_time:.2f} сек"
             return
         
         # Иначе используем базовый RAG стриминг
@@ -72,7 +72,6 @@ class FinancialAssistant(SmartDeepThinkRAG):
         question_lower = question.lower()
         
         try:
-            # 🎯 КЛЮЧЕВАЯ СТАВКА ЦБ
             if any(word in question_lower for word in ['ставк', 'ключев', 'цб', 'центробанк', 'процент']):
                 data = await self.financial_parser.get_market_summary()
                 
@@ -80,21 +79,20 @@ class FinancialAssistant(SmartDeepThinkRAG):
                     rate_info = data['key_rate']
                     rate = rate_info.get('rate', 'N/A')
                     
-                    response = f"🏦 **Ключевая ставка ЦБ РФ:** {rate}%"
+                    response = f"Ключевая ставка ЦБ РФ: {rate}%".upper()
                     
                     # Добавляем дополнительную информацию
                     if 'date' in rate_info:
-                        response += f"\n📅 **Дата:** {rate_info['date']}"
+                        response += f"\nДата: {rate_info['date']}".upper()
                     if 'next_meeting' in rate_info:
-                        response += f"\n📋 **Следующее заседание:** {rate_info['next_meeting']}"
+                        response += f"\nСледующее заседание: {rate_info['next_meeting']}".upper()
                     if 'note' in rate_info:
-                        response += f"\n💡 {rate_info['note']}"
+                        response += f"\n{rate_info['note']}".upper()
                     
                     return response
                 else:
-                    return "❌ Не удалось получить актуальные данные о ключевой ставке ЦБ"
+                    return "Не удалось получить актуальные данные о ключевой ставке ЦБ"
             
-            # 🎯 АКЦИИ
             elif any(word in question_lower for word in ['акци', 'тикер', 'котировк', 'цена акци']):
                 symbols = {
                     'sber': 'SBER', 'сбер': 'SBER', 'сбербанк': 'SBER',
@@ -116,17 +114,14 @@ class FinancialAssistant(SmartDeepThinkRAG):
                 data = await self.financial_parser.get_stock_price(symbol_found)
                 return self._format_stock_response(data)
             
-            # 🎯 ВАЛЮТЫ
             elif any(word in question_lower for word in ['курс', 'валют', 'доллар', 'евро', 'usd', 'eur']):
                 data = await self.financial_parser.get_currency_rates()
                 return self._format_currency_response(data)
             
-            # 🎯 СВОДКА РЫНКА
             elif any(word in question_lower for word in ['биржа', 'рынок', 'индекс', 'сводк', 'мосбирж', 'финанс']):
                 data = await self.financial_parser.get_market_summary()
                 return self._format_market_summary(data)
             
-            # 🎯 КОНКРЕТНЫЕ АКЦИИ ПО НАЗВАНИЮ
             elif any(word in question_lower for word in ['сбербанк', 'газпром', 'лукойл', 'втб', 'роснефть']):
                 symbols = {
                     'сбербанк': 'SBER', 'газпром': 'GAZP', 'лукойл': 'LKOH',
@@ -140,14 +135,14 @@ class FinancialAssistant(SmartDeepThinkRAG):
                         
         except Exception as e:
             logger.error(f"Ошибка обработки финансового запроса: {e}")
-            return f"❌ Ошибка при получении финансовых данных: {str(e)}"
+            return f"Ошибка при получении финансовых данных: {str(e)}"
         
         return None
     
     def _format_stock_response(self, data: Dict) -> str:
         """Форматирование ответа по акции"""
         if 'error' in data:
-            return f"❌ {data['error']}"
+            return f"{data['error']}"
         
         change = data.get('change', 0)
         change_percent = data.get('change_percent', 0)
@@ -157,19 +152,19 @@ class FinancialAssistant(SmartDeepThinkRAG):
         response = f"""
 {change_icon} **{data.get('name', data['symbol'])}** ({data['symbol']})
 
-💰 **Цена:** {data.get('last_price', 'N/A')} руб.
-📊 **Изменение:** {change_color}{change} ({change_color}{change_percent}%)
-📦 **Объем:** {self._format_number(data.get('volume', 0))}
-🕒 **Источник:** {data.get('source', 'MOEX')}
-"""
+Цена:{data.get('last_price', 'N/A')} руб.
+Изменение:{change_color}{change} ({change_color}{change_percent}%)
+Объем:{self._format_number(data.get('volume', 0))}
+Источник: {data.get('source', 'MOEX')}
+""".upper()
         return response
     
     def _format_currency_response(self, data: Dict) -> str:
         """Форматирование ответа по валютам"""
         if 'error' in data:
-            return f"❌ {data['error']}"
+            return f"{data['error']}"
         
-        response = "💱 **Курсы валют ЦБ РФ:**\n\n"
+        response = "💱 Курсы валют ЦБ РФ:\n\n".upper()
         
         main_currencies = ['USD', 'EUR', 'CNY']
         found_currencies = 0
@@ -189,26 +184,26 @@ class FinancialAssistant(SmartDeepThinkRAG):
                 found_currencies += 1
         
         if found_currencies == 0:
-            return "❌ Не удалось получить данные о курсах валют"
+            return "Не удалось получить данные о курсах валют"
         
         return response
     
     def _format_market_summary(self, data: Dict) -> str:
         """Форматирование сводки рынка"""
         if 'error' in data:
-            return f"❌ {data['error']}"
+            return f"{data['error']}"
         
-        response = "📊 **Финансовая сводка:**\n\n"
+        response = "Финансовая сводка:\n\n".upper()
         
         # Ключевая ставка
         if data.get('key_rate') and 'error' not in data['key_rate']:
             rate_info = data['key_rate']
-            response += f"🏦 **Ключевая ставка ЦБ:** {rate_info.get('rate', 'N/A')}%\n\n"
+            response += f"Ключевая ставка ЦБ: {rate_info.get('rate', 'N/A')}%\n\n"
         
         # Индексы
         if data.get('indices'):
             indices_data = data['indices']
-            response += "📈 **Основные индексы:**\n"
+            response += "ОСНОВНЫЕ ИНДЕКСЫ:\n".upper()
             
             for index_key in ['IMOEX', 'RTSI']:
                 if index_key in indices_data and 'error' not in indices_data[index_key]:

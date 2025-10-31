@@ -239,10 +239,10 @@ class DatabaseManager:
             return {"success": False, "error": "Номер паспорта должен состоять из 6 цифр"}
         
         # Проверка даты рождения
-        if birth_date > date.today():  # 🎯 Работаем с date объектом
+        if birth_date > date.today():
             return {"success": False, "error": "Дата рождения не может быть в будущем"}
         
-        age = self._calculate_age(birth_date)  # 🎯 Передаем date объект
+        age = self._calculate_age(birth_date)
         if age < 18:
             return {"success": False, "error": "Регистрация доступна только с 18 лет"}
         if age > 120:

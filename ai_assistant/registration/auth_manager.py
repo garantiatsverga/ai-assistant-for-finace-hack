@@ -81,7 +81,7 @@ class AuthManager:
                         'age': user['age'],
                         'is_active': user['is_active']
                     }
-                    logger.info(f"🔧 Отладочный вход: {self.current_user['login']}")
+                    logger.info(f"Отладочный вход: {self.current_user['login']}")
                     return {"success": True, "user": self.current_user}
                 else:
                     return {"success": False, "error": "Отладочный пользователь не найден"}

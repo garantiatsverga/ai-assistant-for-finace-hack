@@ -1,15 +1,11 @@
-"""Main AI Assistant module"""
+"""Основной модуль ИИ-ассистента"""
 from typing import List, Optional, Dict, Any, AsyncGenerator
 import asyncio
 import logging
 import os
 import time
-import sys
 
-# Добавляем путь для импортов
-current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, current_dir)
-
+# Импорты из той же папки
 from .cache_manager import EmbeddingCache
 from .config_manager import ConfigManager
 from .security_checker import SecurityChecker
@@ -17,6 +13,7 @@ from .metrics_collector import MetricsCollector
 from .dialogue_memory import DialogueMemory
 from .llm_adapter import LLMAdapter, LLMError
 from .embeddings_manager import EmbeddingsManager
+from .stock_analyzer import StockAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +36,14 @@ class SmartDeepThinkRAG:
             self.embedding_cache = EmbeddingCache()
             self.llm = LLMAdapter(
                 model_name=self.config['model']['name'],
-                timeout=self.config.get('model', {}).get('timeout', 30)
+                timeout=self.config.get('model', {}).get('timeout', 120)
             )
             self.security = SecurityChecker()
             self.metrics = MetricsCollector()
             self.memory = DialogueMemory()
+            
+            # Инициализация анализатора акций
+            self.stock_analyzer = StockAnalyzer()
             
             # Загрузка базы знаний и предварительные вычисления
             self.documents = self._load_knowledge_base()
@@ -89,100 +89,220 @@ class SmartDeepThinkRAG:
         return []
 
     async def ask_streaming(self, question: str) -> AsyncGenerator[str, None]:
-        """Асинхронный метод со detailed tracing и поддержкой флагов"""
+        """Асинхронный метод с улучшенным DeepThink и аналитикой акций"""
         start_time = time.time()
         
         try:
-            logger.info("🔧 [1] Начало ask_streaming")
-            
-            # Извлекаем флаги из вопроса
+            # Извлекаем флаги и определяем режимы
             clean_question, flags = self.security._extract_flags(question)
-            
-            # Показываем активные флаги
-            if flags:
-                yield f"\n🎛️ Активные флаги: {', '.join(flags)}\n"
-            
-            # Сохраняем оригинальный вопрос для метрик
-            original_question = question
-            
-            # Проверяем режим deep think (учитываем флаги)
             deepthink_mode = question.endswith(" -deepthink") and '-nodeep' not in flags
+            
             if deepthink_mode:
                 clean_question = clean_question[:-10].strip()
-                
-            logger.info("🔧 [2] Исправляем раскладку")
-            clean_question = self._fix_keyboard_layout(clean_question)
+                yield "АКТИВИРОВАН РЕЖИМ DEEPTHINK\n"
+                yield "=" * 50 + "\n"
             
-            logger.info("🔧 [3] Проверяем безопасность")
-            is_safe, reason = await self.security.check(question)  # Проверяем оригинальный вопрос с флагами
-            
+            # Проверка безопасности
+            is_safe, reason = await self.security.check(question)
             if not is_safe:
-                logger.info("🔧 [3a] Запрос заблокирован")
-                yield reason
+                if deepthink_mode:
+                    yield f"АНАЛИЗ БЕЗОПАСНОСТИ: {reason}\n"
+                    yield "Запрос отклонен по политике безопасности\n"
+                    yield "=" * 50 + "\n"
+                else:
+                    yield reason
                 return
             
-            logger.info("🔧 [4] Получаем эмбеддинг вопроса")
+            # Получаем информацию для ответа
             question_embedding = await self.embedding_manager.get_embedding(clean_question)
-            
-            logger.info("🔧 [5] Ищем похожие документы")
             similar_docs = await self.embedding_manager.find_similar(
-                clean_question,
-                question_embedding,
-                self.doc_embeddings,
-                self.documents,
-                top_k=self.config['rag']['top_k_documents']
+                clean_question, question_embedding, self.doc_embeddings, self.documents, top_k=3
             )
             
-            logger.info(f"🔧 [5a] Найдено документов: {len(similar_docs)}")
+            # Анализ акций (если применимо)
+            investment_analysis = None
+            question_lower = clean_question.lower()
             
-            # Добавляем сообщение в память диалога
-            self.memory.add_message('user', clean_question)
+            if any(word in question_lower for word in ['акции', 'инвестиц', 'вложить', 'куда вложить', 'портфель', 'выгодн']):
+                market_data = await self._get_real_market_data()
+                
+                # Анализ конкретной акции
+                for symbol in ['GAZP', 'SBER', 'LKOH', 'YNDX', 'ROSN', 'VTBR']:
+                    if symbol.lower() in question_lower:
+                        investment_analysis = await self.stock_analyzer.analyze_single_stock(symbol, market_data)
+                        break
+                
+                # Общий инвестиционный анализ
+                if not investment_analysis:
+                    investment_analysis = await self.stock_analyzer.analyze_investment_query(clean_question, market_data)
             
-            # Генерация ответа со стримингом
-            full_response = ""
+            # DeepThink анализ
+            if deepthink_mode:
+                yield await self._generate_deepthink_analysis(clean_question, similar_docs, investment_analysis)
             
-            # Сначала выводим индикатор начала ответа
-            logger.info("🔧 [6] Отправляем индикатор ответа")
+            # Показываем финансовый анализ (если есть)
+            if investment_analysis and 'error' not in investment_analysis:
+                yield "\nФИНАНСОВЫЙ АНАЛИЗ:\n"
+                if 'strategy_name' in investment_analysis:
+                    strategy = investment_analysis
+                    yield f"{strategy['strategy_name'].upper()} СТРАТЕГИЯ\n"
+                    yield f"{strategy['strategy_description']}\n"
+                    yield f"Распределение: {strategy['recommended_allocation']}\n\n"
+                    
+                    yield "РЕКОМЕНДУЕМЫЕ АКЦИИ:\n"
+                    for stock in strategy['stocks']:
+                        yield f"• {stock['name']} ({stock['symbol']}) - {stock['price']} руб.\n"
+                        yield f"  Риск: {stock['risk']} | Дивиденды: {stock['dividend_yield']}\n"
+                        description = stock.get('description', '')
+                        if description:
+                            yield f"  📊 {description}\n"
+                        yield "\n"
+                else:
+                    # Анализ одной акции
+                    stock = investment_analysis
+                    yield f"{stock['name']} ({stock['symbol']})\n"
+                    yield f"Текущая цена: {stock['current_price']} руб.\n"
+                    yield f"Динамика: {stock['change']:+.2f} ({stock['change_percent']:+.2f}%)\n"
+                    yield f"Тренд: {stock['trend']}\n"
+                    yield f"Уровень риска: {stock['risk']}\n"
+                    yield f"Дивидендная доходность: {stock['dividend_yield']}\n"
+                    yield f"Рекомендация: {stock['recommendation']}\n\n"
             
-            # Показываем информацию о режиме
-            if '-simple' in flags:
-                yield "\n🤖 [ПРОСТОЙ РЕЖИМ] "
-            elif flags:
-                yield f"\n🤖 [РЕЖИМ: {', '.join(flags)}] "
+            # Основной ответ
+            if deepthink_mode:
+                yield "ОСНОВНОЙ ОТВЕТ:\n"
+            elif '-simple' in flags:
+                yield "[ПРОСТОЙ РЕЖИМ] "
             else:
-                yield "\n🤖 Ответ: "
+                yield "Ответ: "
             
-            # Затем стримим ответ от модели
-            logger.info("🔧 [7] Начинаем стриминг от LLM")
-            chunk_count = 0
+            # Генерация ответа от LLM с проверкой релевантности
+            full_response = ""
+            relevant_chunks = []
             
-            # Передаем флаги в LLM для адаптации ответа
             async for chunk in self.llm.generate_answer_streaming(clean_question, similar_docs, deepthink_mode, flags):
-                logger.info(f"🔧 [7a] Получен chunk #{chunk_count}: '{chunk}'")
-                chunk_count += 1
-                yield chunk
+                # Проверяем релевантность чанка
+                if self._is_relevant_chunk(chunk, clean_question):
+                    relevant_chunks.append(chunk)
+                    yield chunk
                 full_response += chunk
             
-            logger.info(f"🔧 [8] Стриминг завершен. Чанков: {chunk_count}")
+            # Если ответ нерелевантен - даем запаcной вариант
+            if not self._is_response_relevant(full_response, clean_question) and investment_analysis:
+                yield "\n\nНа основе анализа рекомендую:\n"
+                if 'stocks' in investment_analysis:
+                    for stock in investment_analysis['stocks'][:3]:
+                        yield f"• {stock['name']} - {stock.get('price', 'N/A')} руб. ({stock.get('risk', 'N/A')} риск)\n"
+                elif 'current_price' in investment_analysis:
+                    stock = investment_analysis
+                    yield f"• {stock['name']} - {stock.get('current_price', 'N/A')} руб. ({stock.get('risk', 'N/A')} риск)\n"
             
-            # Добавляем ответ в память
+            # Добавляем в память и выводим время
+            self.memory.add_message('user', clean_question)
             self.memory.add_message('assistant', full_response)
             
-            # В конце выводим время ответа
             response_time = time.time() - start_time
-            time_info = f"\n\n⏱️ Время ответа: {response_time:.2f} сек"
-            logger.info(f"🔧 [9] Отправляем время ответа: {response_time:.2f}сек")
-            yield time_info
-            
-            # Сбор метрик
-            intent, _ = self.security.analyze_intent(original_question)
-            self.metrics.log_query(original_question, intent, response_time, True)
-            
-            logger.info("🔧 [10] Ask_streaming завершен успешно")
+            yield f"\n\n⏱Время ответа: {response_time:.2f} сек"
             
         except Exception as e:
-            logger.error(f"💥 Критическая ошибка в ask_streaming: {e}", exc_info=True)
-            yield f"❌ Произошла ошибка: {e}"
+            logger.error(f"Критическая ошибка в ask_streaming: {e}", exc_info=True)
+            yield f"Произошла ошибка: {e}"
+
+    async def _generate_deepthink_analysis(self, question: str, similar_docs: List[str], investment_analysis: Any) -> str:
+        """Генерация анализа для DeepThink режима"""
+        analysis = []
+        
+        # Анализ намерения
+        question_lower = question.lower()
+        if any(word in question_lower for word in ['что такое', 'определ']):
+            intent = "ПОЛУЧИТЬ ОПРЕДЕЛЕНИЕ"
+        elif any(word in question_lower for word in ['как', 'процесс']):
+            intent = "УЗНАТЬ ПРОЦЕСС"
+        elif any(word in question_lower for word in ['документ', 'нужно']):
+            intent = "УЗНАТЬ ДОКУМЕНТЫ" 
+        elif any(word in question_lower for word in ['ставк', 'стоимость']):
+            intent = "УЗНАТЬ СТОИМОСТЬ"
+        elif any(word in question_lower for word in ['акции', 'инвестиц', 'вложить']):
+            intent = "ИНВЕСТИЦИОННЫЙ ЗАПРОС"
+        else:
+            intent = "ℹОБЩИЙ ЗАПРОС"
+        
+        analysis.append(f"АНАЛИЗ НАМЕРЕНИЯ: {intent}")
+        analysis.append(f"ОРИГИНАЛЬНЫЙ ВОПРОС: '{question}'")
+        analysis.append(f"НАЙДЕНО ДОКУМЕНТОВ: {len(similar_docs)}")
+        
+        if similar_docs:
+            analysis.append("РЕЛЕВАНТНАЯ ИНФОРМАЦИЯ:")
+            for i, doc in enumerate(similar_docs[:2], 1):
+                preview = doc[:100] + "..." if len(doc) > 100 else doc
+                analysis.append(f"   {i}. {preview}")
+        
+        if investment_analysis and 'error' not in investment_analysis:
+            analysis.append("ДОСТУПНЫ ДАННЫЕ РЫНКА:")
+        
+        analysis.append("СООТВЕТСТВИЕ БЕЗОПАСНОСТИ: Проверено")
+        analysis.append("=" * 50)
+        analysis.append("")
+        
+        return "\n".join(analysis)
+
+    async def _get_real_market_data(self) -> Dict[str, Any]:
+        """Получение реальных рыночных данных для анализа"""
+        try:
+            # Используем существующие парсеры для получения реальных данных
+            from ..parsers.financial_parser import FinancialDataParser
+            
+            parser = FinancialDataParser()
+            market_data = {}
+            
+            # Получаем данные по основным акциям
+            symbols = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'ROSN', 'VTBR']
+            
+            for symbol in symbols:
+                try:
+                    stock_data = await parser.get_stock_price(symbol)
+                    if 'error' not in stock_data:
+                        market_data[symbol] = {
+                            'last_price': stock_data.get('last_price'),
+                            'change': stock_data.get('change', 0),
+                            'change_percent': stock_data.get('change_percent', 0),
+                            'volume': stock_data.get('volume', 0)
+                        }
+                except Exception as e:
+                    logger.warning(f"Не удалось получить данные по {symbol}: {e}")
+                    # Используем заглушку если API не доступно
+                    market_data[symbol] = await self._get_fallback_data(symbol)
+            
+            await parser.close()
+            return market_data
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения рыночных данных: {e}")
+            return await self._get_fallback_data()
+        
+
+    def _is_relevant_chunk(self, chunk: str, question: str) -> bool:
+        """Проверка релевантности чанка вопросу"""
+        question_lower = question.lower()
+        chunk_lower = chunk.lower()
+        
+        # Если вопрос про акции, а ответ про ипотеку - нерелевантно
+        if any(word in question_lower for word in ['акции', 'инвестиц', 'вложить']):
+            if any(word in chunk_lower for word in ['ипотек', 'кредит на недвижимость', 'вклад']):
+                return False
+        
+        return True
+
+    def _is_response_relevant(self, response: str, question: str) -> bool:
+        """Проверка релевантности всего ответа"""
+        question_lower = question.lower()
+        response_lower = response.lower()
+        
+        relevant_keywords = []
+        if any(word in question_lower for word in ['акции', 'инвестиц']):
+            relevant_keywords = ['акци', 'сбер', 'газпром', 'лукойл', 'яндекс', 'дивидент', 'портфель', 'инвест']
+        
+        return any(keyword in response_lower for keyword in relevant_keywords)
 
     async def ask(self, question: str) -> str:
         """Асинхронный метод для прямого вызова из main.py"""
@@ -203,20 +323,14 @@ class SmartDeepThinkRAG:
         """Синхронная обертка для использования в асинхронном контексте"""
         import asyncio
         
-        # Просто запускаем асинхронную функцию и возвращаем результат
-        # Без создания новых event loops
         try:
-            # Пробуем получить текущий loop
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # Если loop уже запущен, используем asyncio.run_coroutine_threadsafe
                 future = asyncio.run_coroutine_threadsafe(self.ask(question), loop)
                 return future.result()
             else:
-                # Если loop не запущен, используем run_until_complete
                 return loop.run_until_complete(self.ask(question))
         except RuntimeError:
-            # Если нет event loop, создаем новый
             return asyncio.run(self.ask(question))
 
     def _fix_keyboard_layout(self, text: str) -> str:
@@ -249,14 +363,14 @@ if __name__ == "__main__":
     try:
         assistant = SmartDeepThinkRAG()
         
-        print("\n🎯 AI Assistant готов к работе!")
-        print("💡 Для углубленного анализа добавьте '-deepthink' к вопросу")
-        print("🚪 Для выхода введите 'exit', 'quit' или 'стоп'")
+        print("\nИИ-ассистент готов к работе!")
+        print("Для углубленного анализа добавьте '-deepthink' к вопросу")
+        print("Для выхода введите 'exit', 'quit' или 'стоп'")
         
         while True:
-            question = input("\n💬 Ваш вопрос: ").strip()
+            question = input("\nВаш вопрос: ").strip()
             if question.lower() in ['exit', 'quit', 'стоп']:
-                print("👋 До свидания!")
+                print("До свидания!")
                 break
             if not question:
                 continue
@@ -264,9 +378,9 @@ if __name__ == "__main__":
             assistant.ask_sync(question)
             
     except AssistantInitializationError as e:
-        print(f"❌ Ошибка инициализации: {e}")
-        print("🔧 Проверьте настройки и зависимости")
+        print(f"Ошибка инициализации: {e}")
+        print("Проверьте настройки и зависимости")
     except KeyboardInterrupt:
-        print("\n👋 Работа завершена пользователем")
+        print("\nРабота завершена пользователем")
     except Exception as e:
-        print(f"💥 Критическая ошибка: {e}")
+        print(f"Критическая ошибка: {e}")

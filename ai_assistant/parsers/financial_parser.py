@@ -93,7 +93,6 @@ class FinancialDataParser:
     
     async def close(self):
         """Закрытие всех сессий парсеров"""
-        self.logger.info("Закрытие сессий парсеров...")
         close_tasks = []
         
         for name, parser in self.sources.items():
@@ -102,5 +101,3 @@ class FinancialDataParser:
         
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
-        
-        self.logger.info("Все сессии парсеров закрыты")
