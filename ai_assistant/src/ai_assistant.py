@@ -41,6 +41,12 @@ class SmartDeepThinkRAG:
             self.security = SecurityChecker()
             self.metrics = MetricsCollector()
             self.memory = DialogueMemory()
+
+            async def initialize_qdrant(self):
+                """Инициализация Qdrant"""
+                if self.config.get('qdrant', {}).get('enabled', True):
+                    qdrant_status = await self.embedding_manager.get_qdrant_status()
+                    logger.info(f"Статус Qdrant: {qdrant_status}")
             
             # Инициализация анализатора акций
             self.stock_analyzer = StockAnalyzer()
@@ -51,12 +57,21 @@ class SmartDeepThinkRAG:
                 self.documents, 
                 self.embedding_cache
             )
+
+            # Вызываем Qdrant
+            asyncio.create_task(self.initialize_qdrant())
             
             logger.info(f"Система инициализирована. Документов в базе: {len(self.documents)}")
             
         except Exception as e:
             logger.error(f"Ошибка инициализации ассистента: {e}")
             raise AssistantInitializationError(f"Не удалось инициализировать ассистент: {e}")
+
+    async def initialize_qdrant(self):
+        """Инициализация Qdrant"""
+        if self.config.get('qdrant', {}).get('enabled', True):
+            qdrant_status = await self.embedding_manager.get_qdrant_status()
+            logger.info(f"Статус Qdrant: {qdrant_status}")
 
     def _validate_config(self):
         """Валидация конфигурации"""
